@@ -26,16 +26,43 @@ static int luarure_captures_gc (lua_State * L) {
 // rure captures methods
 static int luarure_captures_index (lua_State * L) {
 	rure_captures * captures = lua_checkrurecaptures(L, 1);
-	if (lua_isinteger(L, 2)) {
-		lua_Integer index = lua_tointeger(L, 2);
-		rure_match match;
-		if (index >= 0 && rure_captures_at(captures, (size_t) index, &match)
-		&& lua_getuservalue(L, 1) != LUA_TNIL) {
-			const char * str = lua_tostring(L, -1);
-			lua_pushlstring(L, &str[match.start], match.end - match.start);
-			return 1;
+	switch (lua_type(L, 2)) {
+		case LUA_TNUMBER: {
+			if (lua_isinteger(L, 2)) {
+				lua_Integer index = lua_tointeger(L, 2);
+				rure_match match;
+				
+				if (index >= 0 && rure_captures_at(captures, (size_t) index, &match)
+				&& lua_getuservalue(L, 1) == LUA_TTABLE
+				&& lua_getfield(L, -1, "haystack") == LUA_TSTRING) {
+					const char * str = lua_tostring(L, -1);
+					lua_pushlstring(L, &str[match.start], match.end - match.start);
+					return 1;
+				}
+			}
+			break;
 		}
+		case LUA_TSTRING: {
+			if (lua_getuservalue(L, 1) == LUA_TTABLE
+			&& lua_getfield(L, -1, "regex") == LUA_TUSERDATA) {
+				rure * regex = lua_checkrure(L, -1);
+				const char * name = lua_tostring(L, 2);
+				int32_t index = rure_capture_name_index(regex, name);
+				rure_match match;
+				
+				if (index != -1
+				&& rure_captures_at(captures, (size_t) index, &match)
+				&& lua_getfield(L, -2, "haystack") == LUA_TSTRING) {
+					const char * str = lua_tostring(L, -1);
+					lua_pushlstring(L, &str[match.start], match.end - match.start);
+					return 1;
+				}
+			}
+			break;
+		}
+		default: (void) (0);
 	}
+	
 	lua_pushnil(L);
 	return 1;
 }
@@ -104,7 +131,11 @@ static int luarure_find_captures (lua_State * L) {
 	if (res) {
 		rure_captures * * ud = lua_newuserdata(L, sizeof (rure_captures *));
 		*ud = captures;
-		lua_pushvalue(L, 2); // Push string.
+		lua_createtable(L, 0, 2);
+#define PUSH_SET(L, t, k, v) (lua_pushvalue((L), (v)), lua_setfield((L), (t) - 1, (k)))
+		PUSH_SET(L, -1, "regex", 1);
+		PUSH_SET(L, -1, "haystack", 2);
+#undef PUSH_SET
 		lua_setuservalue(L, -2); // Set as uservalue of captures.
 		luaL_setmetatable(L, RURE_CAPTURES_NAME);
 	} else
