@@ -1,6 +1,9 @@
 # unused
 luarure_captures*
 
+# random stuff
+*.txt
+
 # astyle backups
 *.orig
 

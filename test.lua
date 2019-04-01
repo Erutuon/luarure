@@ -10,6 +10,7 @@ local captures = re:find_captures "Test"
 assert(captures[1] == "T")
 assert(captures[2] == "est")
 assert(captures[3] == nil)
+assert(captures.nonexistent == nil)
 
 local re = rure.new "(?P<capital>\\p{Upper})(\\p{Lower})(?P<lowercase>\\p{Lower}+)"
 local captures = re:find_captures "Test"
@@ -27,3 +28,6 @@ local iter = str:gmatch "."
 for match in re:iter(str) do
 	assert(match == iter())
 end
+
+local gc_func = getmetatable(re) and getmetatable(re).__gc
+assert(gc_func and pcall(function () gc_func(re):is_match 'a' end) == false)
