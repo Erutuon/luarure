@@ -20,3 +20,10 @@ assert(captures[4] == nil)
 assert(captures.capital == "T")
 assert(captures.lowercase == "st")
 assert(captures.nonexistent == nil)
+
+local re = rure.new "\\p{Latn}"
+local str = "abc"
+local iter = str:gmatch "."
+for match in re:iter(str) do
+	assert(match == iter())
+end
