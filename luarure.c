@@ -95,6 +95,12 @@ static int luarure_captures_index (lua_State * L) {
 	return 1;
 }
 
+static int luarure_captures_len (lua_State * L) {
+	rure_captures * captures = lua_check_rure_captures(L, 1);
+	lua_pushinteger(L, (lua_Integer) rure_captures_len(captures));
+	return 1;
+}
+
 // rure constructor and metamethods
 static int luarure_new (lua_State * L) {
 	size_t len;
@@ -132,13 +138,40 @@ static int luarure_find (lua_State * L) {
 	const char * str = luaL_checklstring(L, 2, &len);
 	size_t start = luaL_optinteger(L, 3, 1) - 1; // adjust index
 	rure_match match;
-	bool res = rure_find(regex, (const uint8_t *) str, len, start, &match);
-	if (res)
+	if (rure_find(regex, (const uint8_t *) str, len, start, &match))
 		PUSH_MATCH(L, str, match);
 	else
 		lua_pushnil(L);
 	return 1;
 }
+
+#define ADJUST_NEGATIVE_INDEX_BY(index, val) \
+	((index) < 0 ? (index) + (val) : (index))
+
+static inline void luarure_add_uservalue (lua_State * L,
+											 int regex_index,
+											 int haystack_index) {
+	lua_createtable(L, 0, 2);
+	regex_index = ADJUST_NEGATIVE_INDEX_BY(regex_index, -1);
+	haystack_index = ADJUST_NEGATIVE_INDEX_BY(haystack_index, -1);
+#define PUSH_SET(L, t, k, v) (lua_pushvalue((L), (v)), lua_setfield((L), (t) - 1, (k)))
+	PUSH_SET(L, -1, "regex", regex_index);
+	PUSH_SET(L, -1, "haystack", haystack_index);
+#undef PUSH_SET
+	lua_setuservalue(L, -2); // Set as uservalue of captures.
+}
+
+static inline void lua_push_rure_captures (lua_State * L,
+                                           rure_captures * captures,
+                                           int regex_index,
+                                           int haystack_index) {
+	NEW_USERDATA(L, rure_captures, captures, RURE_CAPTURES_NAME);
+	regex_index = ADJUST_NEGATIVE_INDEX_BY(regex_index, -1);
+	haystack_index = ADJUST_NEGATIVE_INDEX_BY(haystack_index, -1);
+	luarure_add_uservalue(L, regex_index, haystack_index);
+}
+
+#undef ADJUST_NEGATIVE_INDEX_BY
 
 static int luarure_find_captures (lua_State * L) {
 	rure * regex = lua_check_rure(L, 1);
@@ -146,37 +179,43 @@ static int luarure_find_captures (lua_State * L) {
 	const char * str = luaL_checklstring(L, 2, &len);
 	size_t start = luaL_optinteger(L, 3, 1) - 1; // adjust index
 	rure_captures * captures = rure_captures_new(regex);
-	bool res = rure_find_captures(regex, (const uint8_t *) str, len, start, captures);
-	if (res) {
-		NEW_USERDATA(L, rure_captures, captures, RURE_CAPTURES_NAME);
-		lua_createtable(L, 0, 2);
-#define PUSH_SET(L, t, k, v) (lua_pushvalue((L), (v)), lua_setfield((L), (t) - 1, (k)))
-		PUSH_SET(L, -1, "regex", 1);
-		PUSH_SET(L, -1, "haystack", 2);
-#undef PUSH_SET
-		lua_setuservalue(L, -2); // Set as uservalue of captures.
-	} else
+	if (rure_find_captures(regex, (const uint8_t *) str, len, start, captures))
+		lua_push_rure_captures(L, captures, 1, 2);
+	else
 		lua_pushnil(L);
 	return 1;
 }
 
-static int luarure_iter_next (lua_State * L);
 
-static int luarure_iter (lua_State * L) {
+static int luarure_iter_shared (lua_State * L, int (* func) (lua_State *)) {
 	rure * regex = lua_check_rure(L, 1);
 	luaL_checkstring(L, 2);
 	rure_iter * iter = rure_iter_new(regex);
-	lua_pushcfunction(L, luarure_iter_next);
+	
+	lua_pushcfunction(L, func);
+	
 	NEW_USERDATA(L, rure_iter, iter, RURE_ITER_NAME);
-	lua_pushvalue(L, 2);
-	lua_setuservalue(L, -2); // Set string as uservalue.
+	luarure_add_uservalue(L, 1, 2);
+	
 	return 2;
+}
+
+static int luarure_iter_next (lua_State * L);
+static int luarure_iter_next_captures (lua_State * L);
+
+static int luarure_iter (lua_State * L) {
+	return luarure_iter_shared(L, luarure_iter_next);
+}
+
+static int luarure_iter_captures (lua_State * L) {
+	return luarure_iter_shared(L, luarure_iter_next_captures);
 }
 
 // rure_iter methods
 static int luarure_iter_next (lua_State * L) {
 	rure_iter * iter = lua_check_rure_iter(L, 1);
-	if (lua_getuservalue(L, 1) == LUA_TSTRING) {
+	if (lua_getuservalue(L, 1) == LUA_TTABLE
+	&& lua_getfield(L, -1, "haystack") == LUA_TSTRING) {
 		size_t len;
 		const char * str = lua_tolstring(L, -1, &len);
 		if (str != NULL) {
@@ -185,6 +224,26 @@ static int luarure_iter_next (lua_State * L) {
 				PUSH_MATCH(L, str, match);
 				return 1;
 			}
+		}
+	}
+	return 0;
+}
+
+static int luarure_iter_next_captures (lua_State * L) {
+	rure_iter * iter = lua_check_rure_iter(L, 1);
+	if (lua_getuservalue(L, 1) == LUA_TTABLE
+	&& lua_getfield(L, -1, "haystack") == LUA_TSTRING) {
+		size_t len;
+		const char * str = lua_tolstring(L, -1, &len);
+		if (str != NULL
+		&& lua_getfield(L, -2, "regex") == LUA_TUSERDATA) {
+			rure * regex = lua_check_rure(L, -1);
+			rure_captures * captures = rure_captures_new(regex);
+			if (rure_iter_next_captures(iter, (const uint8_t *) str, len, captures)) {
+				lua_push_rure_captures(L, captures, -1, -2);
+				return 1;
+			}
+			rure_captures_free(captures);
 		}
 	}
 	return 0;
@@ -208,6 +267,7 @@ static const luaL_Reg luarure_methods[] = {
 	ENTRY(find),
 	ENTRY(find_captures),
 	ENTRY(iter),
+	ENTRY(iter_captures),
 	{ NULL, NULL }
 };
 
@@ -216,6 +276,7 @@ static const luaL_Reg luarure_methods[] = {
 static const luaL_Reg luarure_captures_metamethods[] = {
 	{ "__gc", luarure_captures_gc },
 	{ "__index", luarure_captures_index },
+	{ "__len", luarure_captures_len },
 	{ NULL, NULL }
 };
 
