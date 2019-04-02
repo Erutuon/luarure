@@ -47,18 +47,19 @@ MAKE_FUNCS(rure_iter, RURE_ITER_NAME)
 // rure captures methods
 static int luarure_captures_index (lua_State * L) {
 	rure_captures * captures = lua_check_rure_captures(L, 1);
+	rure_match match;
+	const char * str;
+	int32_t index;
+	
 	switch (lua_type(L, 2)) {
 		case LUA_TNUMBER: {
 			if (lua_isinteger(L, 2)) {
-				lua_Integer index = lua_tointeger(L, 2);
-				rure_match match;
+				lua_Integer supplied_index = lua_tointeger(L, 2);
 				
-				if (index >= 0 && rure_captures_at(captures, (size_t) index, &match)
-				&& lua_getuservalue(L, 1) == LUA_TTABLE
-				&& lua_getfield(L, -1, "haystack") == LUA_TSTRING) {
-					const char * str = lua_tostring(L, -1);
-					PUSH_MATCH(L, str, match);
-					return 1;
+				if (0 <= supplied_index && supplied_index <= INT32_MAX
+				&& lua_getuservalue(L, 1) == LUA_TTABLE) {
+					index = (int32_t) supplied_index;
+					goto push_match;
 				}
 			}
 			break;
@@ -68,15 +69,11 @@ static int luarure_captures_index (lua_State * L) {
 			&& lua_getfield(L, -1, "regex") == LUA_TUSERDATA) {
 				rure * regex = lua_check_rure(L, -1);
 				const char * name = lua_tostring(L, 2);
-				int32_t index = rure_capture_name_index(regex, name);
-				rure_match match;
+				index = rure_capture_name_index(regex, name);
 				
-				if (index != -1
-				&& rure_captures_at(captures, (size_t) index, &match)
-				&& lua_getfield(L, -2, "haystack") == LUA_TSTRING) {
-					const char * str = lua_tostring(L, -1);
-					PUSH_MATCH(L, str, match);
-					return 1;
+				if (index >= 0) {
+					lua_pop(L, 1);
+					goto push_match;
 				}
 			}
 			break;
@@ -84,7 +81,14 @@ static int luarure_captures_index (lua_State * L) {
 		default: (void) (0);
 	}
 	
-	lua_pushnil(L);
+push_match:
+	if (rure_captures_at(captures, (size_t) index, &match)
+	&& lua_getfield(L, -1, "haystack") == LUA_TSTRING) {
+		str = lua_tostring(L, -1);
+		PUSH_MATCH(L, str, match);
+	} else
+		lua_pushnil(L);
+	
 	return 1;
 }
 
