@@ -7,9 +7,12 @@
 #define RURE_NAME "rure"
 #define RURE_CAPTURES_NAME "rure_captures"
 #define RURE_ITER_NAME "rure_iter"
+
 #define CHECK_RURE(L, i) (* (rure * *) luaL_checkudata((L), (i), RURE_NAME))
+
 #define PUSH_MATCH(L, str, match) \
 	lua_pushlstring(L, &str[match.start], match.end - match.start)
+
 #define NEW_USERDATA(L, type, val, name) \
 	do { \
 		type * * ud = lua_newuserdata(L, sizeof *ud); \
@@ -17,22 +20,12 @@
 		luaL_setmetatable(L, name); \
 	} while (0)
 
-#define MAKE_CHECKFUNC(type, name) \
+#define MAKE_FUNCS(type, name) \
 	static inline type * lua_check_##type(lua_State * L, int i) { \
 		type * * ud = luaL_checkudata(L, i, name); \
 		luaL_argcheck(L, *ud != NULL, i, "attempt to use a freed " name); \
 		return *ud; \
-	}
-
-MAKE_CHECKFUNC(rure, RURE_NAME)
-
-MAKE_CHECKFUNC(rure_captures, RURE_CAPTURES_NAME)
-
-MAKE_CHECKFUNC(rure_iter, RURE_ITER_NAME)
-
-#undef MAKE_CHECKFUNC
-
-#define MAKE_GC_FUNC(type, name) \
+	} \
 	static int lua##type##_gc (lua_State * L) { \
 		type * * ud = luaL_checkudata(L, 1, name); \
 		type * var = *ud; \
@@ -43,13 +36,13 @@ MAKE_CHECKFUNC(rure_iter, RURE_ITER_NAME)
 		return 0; \
 	}
 
-MAKE_GC_FUNC(rure, RURE_NAME)
+MAKE_FUNCS(rure, RURE_NAME)
 
-MAKE_GC_FUNC(rure_iter, RURE_ITER_NAME)
+MAKE_FUNCS(rure_captures, RURE_CAPTURES_NAME)
 
-MAKE_GC_FUNC(rure_captures, RURE_CAPTURES_NAME)
+MAKE_FUNCS(rure_iter, RURE_ITER_NAME)
 
-#undef MAKE_GC_FUNC
+#undef MAKE_FUNCS
 
 // rure captures methods
 static int luarure_captures_index (lua_State * L) {
