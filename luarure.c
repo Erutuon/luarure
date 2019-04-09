@@ -1,8 +1,18 @@
 #include <stdio.h>
+#include <string.h>
 
 #include <lua.h>
 #include <lauxlib.h>
 #include <rure.h> // stdbool.h included here
+
+// https://stackoverflow.com/a/3213261
+#if defined(WIN32) || defined(_WIN32) || defined(__WIN32) && !defined(__CYGWIN__)
+#define strcasecmp _stricmp
+#else
+#include <strings.h>
+#endif
+
+#define ARRAY_SIZE(array) (sizeof (array) / sizeof ((array)[0]))
 
 #define RURE_NAME "rure"
 #define RURE_CAPTURES_NAME "rure_captures"
@@ -72,7 +82,7 @@ static int luarure_captures_index (lua_State * L) {
 				index = rure_capture_name_index(regex, name);
 				
 				if (index >= 0) {
-					lua_pop(L, 1);
+					lua_pop(L, 1); // Ensure uservalue is at index -1.
 					goto push_match;
 				}
 			}
@@ -98,12 +108,66 @@ static int luarure_captures_len (lua_State * L) {
 	return 1;
 }
 
+// This must be kept in sync with the RURE_FLAG_ macros
+// in rure.h.
+static const char * luarure_flags[] = {
+	"CASEI",
+	"MULTI",
+	"DOTNL",
+	"SWAP_GREED",
+	"SPACE",
+	"UNICODE",
+	NULL
+};
+
+#define MAX_FLAG (sizeof "SWAP_GREED")
+#define INVALID_FLAG ((uint32_t) -1)
+
+static inline uint32_t luarure_get_flag_value (const char * arg) {
+	for (int i = 0; luarure_flags[i] != NULL; ++i) {
+		if (strcasecmp(arg, luarure_flags[i]) == 0)
+			return 1 << i;
+	}
+	
+	return INVALID_FLAG;
+}
+
+static inline uint32_t luarure_check_flags (lua_State * L,
+											int start,
+											uint32_t def) {
+	uint32_t flags = 0;
+	int top = lua_gettop(L);
+	
+	for (int i = start; i <= top; ++i) {
+		size_t len;
+		const char * arg = luaL_checklstring(L, i, &len);
+		
+		if (len <= MAX_FLAG) {
+			uint32_t flag = luarure_get_flag_value(arg);
+			
+			if (flag != INVALID_FLAG) {
+				if (flags & flag)
+					return luaL_argerror(L, i, "the same flag was provided twice");
+				else {
+					flags |= flag;
+					continue;
+				}
+			}
+		}
+		
+		return luaL_argerror(L, i, "invalid flag");
+	}
+	
+	return flags == 0 ? def : flags;
+}
+
 // rure constructor and metamethods
 static int luarure_new (lua_State * L) {
 	size_t len;
 	const char * re = luaL_checklstring(L, 1, &len);
+	uint32_t flags = luarure_check_flags(L, 2, RURE_DEFAULT_FLAGS);
 	rure_error * error = rure_error_new();
-	rure * regex = rure_compile((const uint8_t *) re, len, RURE_DEFAULT_FLAGS, NULL, error);
+	rure * regex = rure_compile((const uint8_t *) re, len, flags, NULL, error);
 	
 	if (regex == NULL) {
 		const char * msg = lua_pushstring(L, rure_error_message(error));
@@ -250,7 +314,6 @@ static int luarure_iter_next_captures (lua_State * L) {
 
 static const luaL_Reg luarure_funcs[] = {
 	ENTRY(new),
-	ENTRY(iter),
 	{ NULL, NULL }
 };
 
@@ -282,12 +345,21 @@ static const luaL_Reg luarure_iter_metamethods[] = {
 	{ NULL, NULL }
 };
 
+static void luarure_push_flag_array (lua_State * L) {
+	lua_createtable(L, 0, ARRAY_SIZE(luarure_flags) - 1);
+	for (int i = 0; luarure_flags[i] != NULL; ++i) {
+		lua_pushstring(L, luarure_flags[i]);
+		lua_seti(L, -2, i);
+	}
+}
+
 #define NEW_METATABLE(L, name, funcs) \
 	luaL_newmetatable(L, name), \
 	luaL_setfuncs(L, funcs, 0)
 
 int luaopen_luarure (lua_State * L) {
 	NEW_METATABLE(L, RURE_NAME, luarure_metamethods);
+	
 	luaL_newlib(L, luarure_methods);
 	lua_setfield(L, -2, "__index");
 	lua_pop(L, 1);
@@ -299,6 +371,8 @@ int luaopen_luarure (lua_State * L) {
 	lua_pop(L, 1);
 	
 	luaL_newlib(L, luarure_funcs);
+	luarure_push_flag_array(L);
+	lua_setfield(L, -2, "flags");
 	
 	return 1;
 }
