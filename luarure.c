@@ -104,7 +104,9 @@ push_match:
 
 static int luarure_captures_len (lua_State * L) {
 	rure_captures * captures = lua_check_rure_captures(L, 1);
-	lua_pushinteger(L, (lua_Integer) rure_captures_len(captures));
+	// Subtract 1 to give the length that captures would have if it were
+	// converted to a Lua table.
+	lua_pushinteger(L, (lua_Integer) rure_captures_len(captures) - 1);
 	return 1;
 }
 
