@@ -72,9 +72,42 @@ for captures in re:iter_captures(str) do
 end
 assert(i == 2)
 
--- The __gc metamethod should prevent a userdatum from being used by a method.
-local gc_func = getmetatable(re) and getmetatable(re).__gc
-assert(gc_func and pcall(function () gc_func(re):is_match 'a' end) == false)
+local function test_gc_func(obj, method_to_test, ...)
+	local mt = getmetatable(obj)
+	assert(type(mt) == "table")
+	
+	local name = mt.__name
+	assert(type(name) == "string")
+	
+	local gc_func = mt.__gc
+	assert(type(gc_func) == "function")
+	
+	gc_func(obj)
+	
+	local method
+	assert(pcall(function ()
+			method = obj[method_to_test]
+		end) == true,
+		"A freed " .. name
+		.. " object should be indexable and have the method "
+		.. method_to_test .. ".")
+	
+	assert(type(method) == "function",
+		"The method " .. method_to_test .. " is "
+		.. (type(method) == "nil" and "nil" or "a " .. type(method))
+		.. ", not a function.")
+	
+	local vararg = { n = select("#", ...), ... }
+	assert(pcall(function ()
+			method(obj, table.unpack(vararg))
+		end) == false,
+		"The __gc metamethod should prevent a freed " .. name
+		.. " object from being used by a method.")
+end
+
+test_gc_func(rure.new "empty", "is_match", "a")
+test_gc_func(rure.new "empty":find_captures "empty", "to_table")
+test_gc_func(select(2, rure.new "empty":iter "empty"), "next")
 
 local re
 assert(pcall(function () re = rure.new("^line \\d+$", "multi") end) == true)

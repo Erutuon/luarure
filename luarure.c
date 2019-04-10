@@ -18,7 +18,7 @@
 #define RURE_CAPTURES_NAME "rure_captures"
 #define RURE_ITER_NAME "rure_iter"
 
-#define CHECK_RURE(L, i) (* (rure * *) luaL_checkudata((L), (i), RURE_NAME))
+#define FREED_ERROR "attempt to use a freed "
 
 #define PUSH_MATCH(L, str, match) \
 	lua_pushlstring(L, &str[match.start], match.end - match.start)
@@ -31,10 +31,18 @@
 	} while (0)
 
 #define MAKE_FUNCS(type, name) \
-	static inline type * lua_check_##type(lua_State * L, int i) { \
+	static inline type * lua_check_##type##_meta(lua_State * L, \
+                                          int i, \
+                                          bool allow_freed) { \
 		type * * ud = luaL_checkudata(L, i, name); \
-		luaL_argcheck(L, *ud != NULL, i, "attempt to use a freed " name); \
+		if (!allow_freed) \
+			luaL_argcheck(L, *ud != NULL, i, \
+                          FREED_ERROR name); \
 		return *ud; \
+	} \
+	static inline type * lua_check_##type(lua_State * L, \
+                                          int i) { \
+		return lua_check_##type##_meta(L, i, false); \
 	} \
 	static int lua##type##_gc (lua_State * L) { \
 		type * * ud = luaL_checkudata(L, 1, name); \
@@ -101,7 +109,7 @@ static int luarure_captures_push_table (lua_State * L) {
 
 // rure captures methods
 static int luarure_captures_index (lua_State * L) {
-	rure_captures * captures = lua_check_rure_captures(L, 1);
+	rure_captures * captures = lua_check_rure_captures_meta(L, 1, true);
 	rure_match match;
 	const char * str;
 	int32_t index;
@@ -110,6 +118,9 @@ static int luarure_captures_index (lua_State * L) {
 		case LUA_TNUMBER: {
 			if (lua_isinteger(L, 2)) {
 				lua_Integer supplied_index = lua_tointeger(L, 2);
+				
+				luaL_argcheck(L, captures != NULL, 1,
+                              FREED_ERROR RURE_CAPTURES_NAME);
 				
 				if (0 <= supplied_index && supplied_index <= INT32_MAX
 				&& lua_getuservalue(L, 1) == LUA_TTABLE) {
@@ -120,6 +131,18 @@ static int luarure_captures_index (lua_State * L) {
 			break;
 		}
 		case LUA_TSTRING: {
+			size_t len;
+			const char * key = lua_tolstring(L, 2, &len);
+			
+			if (len == sizeof "to_table" - 1
+			&& strcmp(key, "to_table") == 0) {
+				lua_pushcfunction(L, luarure_captures_push_table);
+				return 1;
+			}
+			
+			luaL_argcheck(L, captures != NULL, 1,
+						  FREED_ERROR RURE_CAPTURES_NAME);
+			
 			if (lua_getuservalue(L, 1) == LUA_TTABLE
 			&& lua_getfield(L, -1, "regex") == LUA_TUSERDATA) {
 				rure * regex = lua_check_rure(L, -1);
@@ -130,14 +153,6 @@ static int luarure_captures_index (lua_State * L) {
 					lua_pop(L, 1); // Ensure uservalue is at index -1.
 					goto push_match;
 				}
-			}
-			
-			size_t len;
-			const char * key = lua_tolstring(L, 2, &len);
-			if (len == sizeof "to_table" - 1
-			&& strcmp(key, "to_table") == 0) {
-				lua_pushcfunction(L, luarure_captures_push_table);
-				return 1;
 			}
 			
 			break;
@@ -401,6 +416,12 @@ static const luaL_Reg luarure_iter_metamethods[] = {
 	{ NULL, NULL }
 };
 
+static const luaL_Reg luarure_iter_methods[] = {
+	{ "next", luarure_iter_next },
+	{ "next_captures", luarure_iter_next_captures },
+	{ NULL, NULL }
+};
+
 static void luarure_push_flag_array (lua_State * L) {
 	lua_createtable(L, 0, ARRAY_SIZE(luarure_flags) - 1);
 	for (int i = 0; luarure_flags[i] != NULL; ++i) {
@@ -413,17 +434,20 @@ static void luarure_push_flag_array (lua_State * L) {
 	luaL_newmetatable(L, name), \
 	luaL_setfuncs(L, funcs, 0)
 
+#define ADD_INDEX_METATABLE(L, funcs) \
+	luaL_newlib(L, funcs), \
+	lua_setfield(L, -2, "__index");
+
 int luaopen_luarure (lua_State * L) {
 	NEW_METATABLE(L, RURE_NAME, luarure_metamethods);
-	
-	luaL_newlib(L, luarure_methods);
-	lua_setfield(L, -2, "__index");
+	ADD_INDEX_METATABLE(L, luarure_methods);
 	lua_pop(L, 1);
 	
 	NEW_METATABLE(L, RURE_CAPTURES_NAME, luarure_captures_metamethods);
 	lua_pop(L, 1);
 	
 	NEW_METATABLE(L, RURE_ITER_NAME, luarure_iter_metamethods);
+	ADD_INDEX_METATABLE(L, luarure_iter_methods);
 	lua_pop(L, 1);
 	
 	luaL_newlib(L, luarure_funcs);
