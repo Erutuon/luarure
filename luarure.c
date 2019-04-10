@@ -54,6 +54,51 @@ MAKE_FUNCS(rure_iter, RURE_ITER_NAME)
 
 #undef MAKE_FUNCS
 
+static int luarure_captures_push_table (lua_State * L) {
+	rure_captures * captures = lua_check_rure_captures(L, 1);
+	size_t captures_len;
+	rure * regex;
+	rure_iter_capture_names * iter;
+	char * capture_name;
+	
+	lua_settop(L, 1);
+	
+	if (!(lua_getuservalue(L, 1) == LUA_TTABLE
+	&& lua_getfield(L, 2, "haystack") == LUA_TSTRING
+	&& lua_getfield(L, 2, "regex") == LUA_TUSERDATA))
+		return luaL_argerror(L, 1, "invalid uservalue in " RURE_CAPTURES_NAME);
+	
+	captures_len = rure_captures_len(captures);
+	lua_createtable(L, captures_len, 0);
+	
+	if (captures_len == 0)
+		return 1;
+	
+	const char * haystack = lua_tostring(L, 3);
+	regex = lua_check_rure(L, 4);
+	
+	for (size_t i = 0; i < captures_len; ++i) {
+		rure_match match;
+		if (rure_captures_at(captures, i, &match)) {
+			PUSH_MATCH(L, haystack, match);
+			lua_seti(L, 5, i);
+		}
+	}
+	
+	iter = rure_iter_capture_names_new(regex);
+	while (rure_iter_capture_names_next(iter, &capture_name)) {
+		int32_t index = rure_capture_name_index(regex, capture_name);
+		rure_match match;
+		if (index != -1 && rure_captures_at(captures, index, &match)) {
+			PUSH_MATCH(L, haystack, match);
+			lua_setfield(L, 5, capture_name);
+		}
+	}
+	rure_iter_capture_names_free(iter);
+	
+	return 1;
+}
+
 // rure captures methods
 static int luarure_captures_index (lua_State * L) {
 	rure_captures * captures = lua_check_rure_captures(L, 1);
@@ -81,11 +126,20 @@ static int luarure_captures_index (lua_State * L) {
 				const char * name = lua_tostring(L, 2);
 				index = rure_capture_name_index(regex, name);
 				
-				if (index >= 0) {
+				if (index != -1) {
 					lua_pop(L, 1); // Ensure uservalue is at index -1.
 					goto push_match;
 				}
 			}
+			
+			size_t len;
+			const char * key = lua_tolstring(L, 2, &len);
+			if (len == sizeof "to_table" - 1
+			&& strcmp(key, "to_table") == 0) {
+				lua_pushcfunction(L, luarure_captures_push_table);
+				return 1;
+			}
+			
 			break;
 		}
 		default: (void) (0);

@@ -16,14 +16,21 @@ local function check_captures(captures, fields)
 		
 		assert(captures[k] == v,
 			"field " .. tostring(k) .. " equaled " .. tostring(captures[k])
-			.. " not " .. tostring(v))
+			.. ", not " .. tostring(v))
 	end
 	
-	local len = #fields + 1
-	assert(#captures == len)
-	assert(captures[len] == nil)
+	local len = #fields
+	assert(#captures == len,
+		"length of captures is " .. tostring(#captures)
+		.. ", not " .. tostring(len))
+	assert(captures[len + 1] == nil)
 	
 	assert(captures.nonexistent == nil)
+	
+	if type(captures) ~= "table" then
+		local captures_table = captures:to_table()
+		check_captures(captures_table, fields)
+	end
 end
 
 local re = rure.new "(\\p{Uppercase})(\\p{Lowercase}+)"
