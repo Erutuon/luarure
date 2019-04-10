@@ -1,4 +1,4 @@
-#! /usr/bin/env lua
+#! /usr/bin/env lua53
 local rure = require "luarure"
 
 local re = rure.new "\\p{Latn}"
@@ -54,9 +54,9 @@ check_captures(captures, {
 
 local re = rure.new "\\p{Latn}"
 local str = "abc"
-local iter = str:gmatch "."
+local next_char = str:gmatch "."
 for match in re:iter(str) do
-	assert(match == iter())
+	assert(match == next_char())
 end
 
 local re = rure.new "(?P<capital>\\p{Upper})(?P<lowercase>\\p{Lower}*)"
@@ -72,7 +72,10 @@ for captures in re:iter_captures(str) do
 end
 assert(i == 2)
 
-local function test_gc_func(obj, method_to_test, ...)
+-- Test metatable-conditioned behavior of rure, rure_captures, and rure_iter
+-- objects.
+
+local function test_metatable(obj, method_to_test, ...)
 	local mt = getmetatable(obj)
 	assert(type(mt) == "table")
 	
@@ -99,15 +102,29 @@ local function test_gc_func(obj, method_to_test, ...)
 	
 	local vararg = { n = select("#", ...), ... }
 	assert(pcall(function ()
-			method(obj, table.unpack(vararg))
+			method(obj, table.unpack(vararg, 1, vararg.n))
 		end) == false,
 		"The __gc metamethod should prevent a freed " .. name
 		.. " object from being used by a method.")
 end
 
-test_gc_func(rure.new "empty", "is_match", "a")
-test_gc_func(rure.new "empty":find_captures "empty", "to_table")
-test_gc_func(select(2, rure.new "empty":iter "empty"), "next")
+-- rure
+test_metatable(rure.new "empty", "is_match", "empty")
+
+-- rure_captures
+test_metatable(rure.new "empty":find_captures "empty", "to_table")
+
+-- rure_iter
+test_metatable(select(2, rure.new "empty":iter "empty"), "next")
+
+-- Test flags. They should be case-insensitive and the behavior of the
+-- resulting regex should be correct.
+
+for i, flag in ipairs {
+	[0] = "CASEI", "MULTI", "DOTNL", "SWAP_GREED", "SPACE", "UNICODE"
+} do
+	assert(rure.flags[i] == flag)
+end
 
 local re
 assert(pcall(function () re = rure.new("^line \\d+$", "multi") end) == true)
@@ -145,9 +162,3 @@ check_captures(captures, {
 	capital = "C",
 	lower = "apitalized",
 })
-
-for i, flag in ipairs {
-	[0] = "CASEI", "MULTI", "DOTNL", "SWAP_GREED", "SPACE", "UNICODE"
-} do
-	assert(rure.flags[i] == flag)
-end
