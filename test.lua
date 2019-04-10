@@ -5,28 +5,48 @@ local re = rure.new "\\p{Latn}"
 
 assert(re:find "a" == "a")
 
+local NIL = {}
+local function check_captures(captures, fields)
+	assert(captures ~= nil)
+	
+	for k, v in pairs(fields) do
+		if k == "__len" then
+			assert(#captures == v)
+			assert(captures[v] == nil)
+		else
+			if v == NIL then
+				v = nil
+			end
+			
+			assert(captures[k] == v,
+				"field " .. tostring(k) .. " equaled " .. tostring(captures[k])
+				.. " not " .. tostring(v))
+		end
+	end
+	
+	assert(captures.nonexistent == nil)
+end
+
 local re = rure.new "(\\p{Uppercase})(\\p{Lowercase}+)"
 local captures = re:find_captures "Test"
-assert(captures ~= nil)
-assert(#captures == 3) -- 0, 1, 2; length of equivalent Lua array would be 2
-assert(captures[0] == "Test")
-assert(captures[1] == "T")
-assert(captures[2] == "est")
-assert(captures[3] == nil)
-assert(captures.nonexistent == nil)
+check_captures(captures, {
+	__len = 3, -- 0, 1, 2; length of equivalent Lua array would be 2
+	[0] = "Test",
+	[1] = "T",
+	[2] = "est",
+})
 
 local re = rure.new "(?P<capital>\\p{Upper})(\\p{Lower})(?P<lowercase>\\p{Lower}+)"
 local captures = re:find_captures "Test"
-assert(captures ~= nil)
-assert(#captures == 4)
-assert(captures[0] == "Test")
-assert(captures[1] == "T")
-assert(captures[2] == "e")
-assert(captures[3] == "st")
-assert(captures[4] == nil)
-assert(captures.capital == "T")
-assert(captures.lowercase == "st")
-assert(captures.nonexistent == nil)
+check_captures(captures, {
+	__len = 4,
+	[0] = "Test",
+	[1] = "T",
+	[2] = "e",
+	[3] = "st",
+	capital = "T",
+	lowercase = "st",
+})
 
 local re = rure.new "\\p{Latn}"
 local str = "abc"
@@ -38,18 +58,13 @@ end
 local re = rure.new "(?P<capital>\\p{Upper})(?P<lowercase>\\p{Lower}*)"
 local str = "Hello, World!"
 local expected_captures = {
-	{ [0] = "Hello", "H", "ello", capital = "H", lowercase = "ello" },
-	{ [0] = "World", "W", "orld", capital = "W", lowercase = "orld" },
+	{ [0] = "Hello", "H", "ello", capital = "H", lowercase = "ello", __len = 3 },
+	{ [0] = "World", "W", "orld", capital = "W", lowercase = "orld", __len = 3 },
 }
 local i = 0
 for captures in re:iter_captures(str) do
 	i = i + 1
-	local expected = expected_captures[i]
-	assert(#captures == #expected + 1)
-	for k, v in pairs(expected) do
-		assert(captures[k] == v)
-	end
-	assert(captures.nonexistent == nil)
+	check_captures(captures, expected_captures[i])
 end
 assert(i == 2)
 
@@ -86,15 +101,14 @@ assert(pcall(function ()
 end) == true)
 
 local captures = re:find_captures "Capitalized"
-assert(captures ~= nil)
-assert(#captures == 3)
-assert(captures[0] == "Capitalized")
-assert(captures[1] == "C")
-assert(captures[2] == "apitalized")
-assert(captures[3] == nil)
-assert(captures.capital == "C")
-assert(captures.lower == "apitalized")
-assert(captures.nonexistent == nil)
+check_captures(captures, {
+	__len = 3,
+	[0] = "Capitalized",
+	[1] = "C",
+	[2] = "apitalized",
+	capital = "C",
+	lower = "apitalized",
+})
 
 for i, flag in ipairs {
 	[0] = "CASEI", "MULTI", "DOTNL", "SWAP_GREED", "SPACE", "UNICODE"
